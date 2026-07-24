@@ -207,6 +207,15 @@ jobs:
 
           echo "asset=${asset}" >> "${GITHUB_OUTPUT}"
 
+      - name: Package functional-test assets
+        env:
+          MACHINE_DIR: ${{ matrix.machine_dir }}
+        run: |
+          scripts/package-functional-assets.sh \
+              "${MACHINE_DIR}/machine.conf" \
+              output \
+              dist
+
       - name: Upload release candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -214,6 +223,7 @@ jobs:
           path: |
             dist/${{ steps.package.outputs.asset }}
             dist/${{ steps.package.outputs.asset }}.sha256
+            dist/${{ steps.machine.outputs.asset_prefix }}--*
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -253,19 +263,32 @@ jobs:
           (
               cd dist
               for checksum in *.tar.zst.sha256; do
-                  sha256sum --check "${checksum}"
+                  sha256sum --check --strict "${checksum}"
+              done
+              for manifest in *--SHA256SUMS; do
+                  sha256sum --check --strict "${manifest}"
               done
           )
 
-      - name: Move release tag to this commit
+      - name: Create immutable release tag
         env:
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
           set -euo pipefail
 
-          git tag --force "${RELEASE_TAG}" "${RELEASE_SHA}"
-          git push --force origin "refs/tags/${RELEASE_TAG}"
+          if git ls-remote \
+              --exit-code \
+              --tags \
+              origin \
+              "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+              echo "release tag already exists: ${RELEASE_TAG}" >&2
+              echo "increment VERSION instead of replacing a release" >&2
+              exit 1
+          fi
+
+          git tag "${RELEASE_TAG}" "${RELEASE_SHA}"
+          git push origin "refs/tags/${RELEASE_TAG}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -274,13 +297,13 @@ jobs:
           name: QEMU machine images ${{ needs.prepare.outputs.version }}
           target_commitish: ${{ github.sha }}
           body: |
-            Prebuilt Buildroot images for the supported QEMU machines.
-
-            This rolling release tracks the latest successful build from `main`.
+            Prebuilt firmware, operating-system, and functional-test assets for
+            the supported QEMU machines.
 
             **Full Changelog**: https://github.com/${{ github.repository }}/commits/${{ needs.prepare.outputs.release_tag }}
-          overwrite_files: true
+          overwrite_files: false
           fail_on_unmatched_files: true
           files: |
             dist/*.tar.zst
             dist/*.tar.zst.sha256
+            dist/*--*

@@ -20,6 +20,7 @@ assets.
     ├── assemble-machine-images.sh
     ├── docker-bake.hcl
     ├── machine-image.sh
+    ├── package-functional-assets.sh
     └── package-machine-images.sh
 ```
 
@@ -61,9 +62,17 @@ images/
 └── ...
 ```
 
-The Buildroot version is independent of the repository release version. It is
-selected when building the container and can change without changing the
-directory or launcher contract.
+A machine may also define a `FUNCTIONAL_IMAGES` array. Those files are
+published individually for QEMU functional tests, using collision-free names:
+
+```text
+<release-asset-prefix>--<image-name>
+<release-asset-prefix>--SHA256SUMS
+```
+
+The component source versions are independent of the repository release
+version. They are pinned by each component recipe and can change without
+changing the directory or launcher contract.
 
 ## Build a machine image
 
@@ -101,6 +110,17 @@ machine with:
 docker buildx bake \
   --file scripts/docker-bake.hcl \
   --file machine/riscv64/sifive_u/build.hcl \
+  release-components
+scripts/assemble-machine-images.sh components output
+```
+
+The K3 Pico-ITX definition builds the pinned SpacemiT SDK inputs and imports a
+hash-verified historical eweOS initramfs:
+
+```console
+docker buildx bake \
+  --file scripts/docker-bake.hcl \
+  --file machine/riscv64/k3-pico-itx/build.hcl \
   release-components
 scripts/assemble-machine-images.sh components output
 ```
@@ -143,11 +163,10 @@ republish the images.
 
 The workflow derives the fixed release tag `v1.0.0` from `VERSION`, discovers
 machines from their `build.hcl` files, builds and assembles their declared
-components, packages the required images, and verifies the checksum. Only
-after every matrix build succeeds does it move the tag to the current commit
-and create or update the matching GitHub Release, replacing its `.tar.zst` and
-`.sha256` assets. This rolling-release model is not compatible with GitHub's
-immutable releases option.
+components, packages the required images, and verifies all checksums. Only
+after every matrix build succeeds does it create the tag and matching GitHub
+Release. Existing tags and release assets are never replaced. Increment
+`VERSION` for every later publication.
 
 ## Run a machine
 
